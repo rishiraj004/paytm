@@ -21,5 +21,8 @@
     "apps/*",
     "packages/*",
     "db"
-  ]
+  ],
+  "dependencies": {
+    "recoil": "^0.7.7"
+  }
 }
