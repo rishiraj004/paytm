@@ -1,77 +1,92 @@
-import { PrismaClient } from "@repo/db/client";
 import bcrypt from "bcrypt";
-import { Session } from "next-auth";
-import { JWT } from "next-auth/jwt";
+import { PrismaClient } from "@repo/db/client";
+import { NextAuthOptions } from "next-auth";
+import CredentialsProvider from "next-auth/providers/credentials";
 
 const db = new PrismaClient();
 
-export const authOptions = {
+export const authOptions: NextAuthOptions = {
   providers: [
-    {
-      id: "credentials",
+    CredentialsProvider({
       name: "Credentials",
-      type: "credentials",
       credentials: {
-        number: { label: "Phone number", type: "text", placeholder: "1231231231" },
-        password: { label: "Password", type: "password" }
+        number: { label: "Phone Number", type: "text", placeholder: "1234567890" },
+        password: { label: "Password", type: "password" },
       },
-      async authorize(credentials: { number?: string; password?: string } | undefined) {
-        // Your existing authorize logic here
-        if (
-          !credentials ||
-          typeof credentials.password !== "string" ||
-          typeof credentials.number !== "string"
-        ) {
+      async authorize(credentials) {
+        // 1. Validate credentials exist
+        if (!credentials?.number || !credentials?.password) {
           return null;
         }
 
+        // 2. Find user in the database
         const existingUser = await db.user.findFirst({
-          where: {
-            number: credentials.number
-          }
+          where: { number: credentials.number },
         });
 
         if (existingUser) {
-          const passwordValidation = await bcrypt.compare(credentials.password, existingUser.password);
+          // 3. If user exists, compare passwords
+          const passwordValidation = await bcrypt.compare(
+            credentials.password,
+            existingUser.password
+          );
           if (passwordValidation) {
+            // 4. On successful login, return the user object
             return {
               id: existingUser.id.toString(),
               name: existingUser.name,
-              email: existingUser.number
+              number: existingUser.number, // Keep the property name consistent
             };
           }
+          // If password is wrong, deny access
           return null;
         }
 
-        const hashedPassword = await bcrypt.hash(credentials.password, 10);
+        // 5. If user does not exist, create a new one
         try {
-          const user = await db.user.create({
+          const hashedPassword = await bcrypt.hash(credentials.password, 10);
+          const newUser = await db.user.create({
             data: {
               number: credentials.number,
-              password: hashedPassword
-            }
+              password: hashedPassword,
+            },
           });
-
           return {
-            id: user.id.toString(),
-            name: user.name,
-            email: user.number
+            id: newUser.id.toString(),
+            name: newUser.name,
+            number: newUser.number,
           };
         } catch (e) {
-          console.error(e);
+          console.error("Failed to create user:", e);
+          return null;
         }
-
-        return null;
-      }
-    }
+      },
+    }),
   ],
-  secret: process.env.JWT_SECRET || "secret",
+  secret: process.env.JWT_SECRET || "a-strong-default-secret-for-development",
   callbacks: {
-    async session({ token, session }: { token: JWT; session: Session }) {
-      if (session.user && token.sub) {
-        (session.user as any).id = token.sub;
+    //
+    // The JWT callback is ESSENTIAL for passing custom data to the session.
+    // It's called whenever a JSON Web Token is created.
+    //
+    async jwt({ token, user }) {
+      if (user) {
+        // The 'user' object is the one returned from 'authorize'
+        token.id = user.id;
+        (token as any).number = (user as any).number;
+      }
+      return token;
+    },
+    //
+    // The session callback makes the data from the JWT available to the client.
+    //
+    async session({ session, token }) {
+      // The 'token' object is the one from the 'jwt' callback
+      if (session.user) {
+        (session.user as any).id = token.id;
+        (session.user as any).number = token.number;
       }
       return session;
-    }
-  }
+    },
+  },
 };
