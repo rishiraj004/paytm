@@ -23,6 +23,7 @@
     "db"
   ],
   "dependencies": {
+    "bcrypt": "^6.0.0",
     "recoil": "^0.7.7"
   }
 }
